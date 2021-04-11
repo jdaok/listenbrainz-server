@@ -81,16 +81,16 @@
       {% if not account.last_updated %}
         <p>We haven't gotten around to importing your listens yet, please check back later!</p>
       {% else %}
-      <p>We imported your listens <abbr class="timeago" title="{{last_updated}}">{{last_updated}}</abbr> and the last song we imported was listened to <abbr class="timeago" title="{{latest_listened_at}}">{{latest_listened_at}}</abbr>.</p>
+        <p>We imported your listens <abbr class="timeago" title="{{service_details["last_updated"]}}">{{service_details["last_updated"]}}</abbr> and the last song we imported was listened to <abbr class="timeago" title="{{service_details["latest_listened_at"]}}">{{service_details["latest_listened_at"]}}</abbr>.</p>
       {% endif %}
 
     {% else %}
       <p>
       Your account is currently not linked. To link your account, please choose one of the following:
       </p>
-      <p><a href="{{ both_url }}" class="btn btn-primary btn-lg">Link my account to record listens and play music</a></p>
-      <p><a href="{{ only_listen_url }}" class="btn btn-primary btn-lg">Link my account to play music only</a></p>
-      <p><a href="{{ only_import_url }}" class="btn btn-primary btn-lg">Link my account to record listens only</a></p>
+      <p><a href="{{ both_auth_url }}" class="btn btn-primary btn-lg">Link my account to record listens and play music</a></p>
+      <p><a href="{{ only_listen_auth_url }}" class="btn btn-primary btn-lg">Link my account to play music only</a></p>
+      <p><a href="{{ only_import_auth__url }}" class="btn btn-primary btn-lg">Link my account to record listens only</a></p>
     {% endif %}
 
   </div>

@@ -243,10 +243,7 @@ class SpotifyService(ExternalServiceBase):
         Args:
             user_id (int): the ListenBrainz row ID of the user
         """
-        row = db_spotify.get_user(user_id)
-        if row:
-            return Spotify.from_dbrow(row)
-        return None
+        return db_spotify.get_user(user_id)
 
     def get_authorize_url(self, feature: ExternalServiceFeature):
         """ Returns a spotipy OAuth instance that can be used to authenticate with spotify.

@@ -149,7 +149,7 @@ export default class APIService {
   };
 
   refreshSpotifyToken = async (): Promise<string> => {
-    const response = await fetch("/profile/refresh-spotify-token", {
+    const response = await fetch("/profile/music-services/spotify/refresh/", {
       method: "POST",
     });
     await this.checkStatus(response);
