@@ -1,7 +1,12 @@
+from typing import Union
+
 import listenbrainz.db.feedback as db_feedback
 import listenbrainz.db.stats as db_stats
 import listenbrainz.db.user as db_user
 import listenbrainz.webserver.rabbitmq_connection as rabbitmq_connection
+from data.model.external_service import ExternalService
+from listenbrainz.domain.service import ExternalServiceBase, ExternalServiceFeature
+from listenbrainz.domain.youtube import YoutubeService
 from listenbrainz.webserver.decorators import crossdomain
 import os
 import re
@@ -287,51 +292,73 @@ def connect_spotify():
     )
 
 
-@profile_bp.route('/connect-youtube/', methods=['GET', 'POST'])
-@login_required
-def connect_youtube():
-    if request.method == 'POST' and request.form.get('delete') == 'yes':
-        youtube.remove_user(current_user.id)
-        flash.success('Your Youtube account has been unlinked')
+def _get_service_or_raise_404(name: str) -> ExternalServiceBase:
+    """Returns the music service for the given name and raise 404 if
+    service is not found
 
-    authorize_url = youtube.get_authorize_url()
-    user = youtube.get_user(current_user.id)
+    Args:
+        name (str): Name of the service
+    """
+    try:
+        service = ExternalService[name.upper()]
+        if service == ExternalService.YOUTUBE:
+            return YoutubeService(current_app.config["YOUTUBE_CONFIG"], current_app.config["YOUTUBE_CALLBACK_URL"])
+    except KeyError:
+        raise NotFound("Service %s is invalid." % name)
+
+
+@profile_bp.route('/music-services/<service_name>/', methods=['GET', 'POST'])
+@login_required
+def connect_service(service_name: str):
+    service = _get_service_or_raise_404(service_name)
+    if request.method == 'POST' and request.form.get('delete') == 'yes':
+        service.remove_user(current_user.id)
+        flash.success('Your %s account has been unlinked' % service_name.capitalize())
+
+    only_listen_auth_url = service.get_authorize_url(ExternalServiceFeature.ONLY_STREAMING)
+    only_import_auth_url = service.get_authorize_url(ExternalServiceFeature.RECORD_LISTENS)
+    both_auth_url = service.get_authorize_url(ExternalServiceFeature.BOTH)
+    user = service.get_user(current_user.id)
 
     return render_template(
-        'user/youtube.html',
+        'user/%s.html' % service_name.lower(),
         account=user,
         last_updated=None,
-        authorize_url=authorize_url
+        only_listen_auth_url=only_listen_auth_url,
+        only_import_auth_url=only_import_auth_url,
+        both_auth_url=both_auth_url,
     )
 
 
-@profile_bp.route('/connect-youtube/callback/')
+@profile_bp.route('/music-services/<service_name>/callback/')
 @login_required
-def connect_youtube_callback():
+def connect_service_callback(service_name: str):
+    service = _get_service_or_raise_404(service_name)
     code = request.args.get('code')
     if not code:
         raise BadRequest('missing code')
-    token = youtube.fetch_access_token(code)
-    youtube.add_new_user(current_user.id, token)
-    flash.success('Successfully authenticated with Youtube!')
-    return redirect(url_for('profile.connect_youtube'))
+    token = service.fetch_access_token(code)
+    service.add_new_user(current_user.id, token)
+    flash.success('Successfully authenticated with %s!' % service_name.capitalize())
+    return redirect(url_for('profile.connect_service', service_name=service_name))
 
 
-@profile_bp.route('/connect-youtube/refresh/', methods=['POST'])
+@profile_bp.route('/music-services/<service_name>/refresh/', methods=['POST'])
 @crossdomain()
 @api_login_required
-def refresh_youtube_token():
-    youtube_user = youtube.get_user(current_user.id)
-    if not youtube_user:
-        raise APINotFound("User has not authenticated to Youtube")
+def refresh_service_token(service_name: str):
+    service = _get_service_or_raise_404(service_name)
+    user = service.get_user(current_user.id)
+    if not user:
+        raise APINotFound("User has not authenticated to %s" % service_name.capitalize())
 
-    if youtube_user["token_expired"]:
+    if user["token_expired"]:
         try:
-            youtube_user = youtube.refresh_token(current_user.id)
+            user = service.refresh_token(current_user.id,)
         except Exception:
-            raise APIServiceUnavailable("Cannot refresh Youtube token right now")
+            raise APIServiceUnavailable("Cannot refresh %s token right now" % service_name.capitalize())
 
-    return jsonify({"access_token": youtube_user["access_token"]})
+    return jsonify({"access_token": user["access_token"]})
 
 
 @profile_bp.route('/connect-spotify/callback')

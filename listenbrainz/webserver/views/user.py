@@ -6,9 +6,12 @@ import time
 
 from flask import Blueprint, render_template, request, url_for, redirect, current_app, jsonify
 from flask_login import current_user, login_required
+
+from data.model.external_service import ExternalService
 from listenbrainz import webserver
 from listenbrainz.db.playlist import get_playlists_for_user, get_playlists_created_for_user, get_playlists_collaborated_on
-from listenbrainz.domain import spotify, youtube
+from listenbrainz.db import external_service as db_service
+from listenbrainz.domain import spotify
 from listenbrainz.webserver.errors import APIBadRequest, APIInternalServerError
 from listenbrainz.webserver.login import User
 from listenbrainz.webserver import timescale_connection
@@ -121,7 +124,8 @@ def profile(user_name):
     logged_in_user_follows_user = None
     if current_user.is_authenticated:
         spotify_data = spotify.get_user_dict(current_user.id)
-        youtube_data = youtube.get_user(current_user.id)
+        youtube_data = db_service.get_token(current_user.id, service=ExternalService.YOUTUBE)
+
         if youtube_data:
             youtube_data['api_key'] = current_app.config["YOUTUBE_API_KEY"]
         current_user_data = {
