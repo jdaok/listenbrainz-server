@@ -87,83 +87,10 @@ class Spotify:
         return "<Spotify(user:%s): %s>" % (self.user_id, self.musicbrainz_id)
 
 
-def refresh_user_token(spotify_user: Spotify):
-    """ Refreshes the user token for the given spotify user.
-
-    Args:
-        spotify_user (domain.spotify.Spotify): the user whose token is to be refreshed
-
-    Returns:
-        user (domain.spotify.Spotify): the same user with updated tokens
-
-    Raises:
-        SpotifyAPIError: if unable to refresh spotify user token
-        SpotifyInvalidGrantError: if the user has revoked authorization to spotify
-
-    Note: spotipy eats up the json body in case of error but we need it for checking
-    whether the user has revoked our authorization. hence, we use our own
-    code instead of spotipy to fetch refresh token.
-    """
-    retries = SPOTIFY_API_RETRIES
-    response = None
-    while retries > 0:
-        response = _get_spotify_token("refresh_token", spotify_user.refresh_token)
-
-        if response.status_code == 200:
-            break
-        elif response.status_code == 400:
-            error_body = response.json()
-            if "error" in error_body and error_body["error"] == "invalid_grant":
-                raise SpotifyInvalidGrantError(error_body)
-
-        response = None  # some other error occurred
-        retries -= 1
-
-    if response is None:
-        raise SpotifyAPIError('Could not refresh API Token for Spotify user')
-
-    response = response.json()
-    access_token = response['access_token']
-    if "refresh_token" in response:
-        refresh_token = response['refresh_token']
-    else:
-        refresh_token = spotify_user.refresh_token
-    expires_at = int(time.time()) + response['expires_in']
-    db_spotify.update_token(spotify_user.user_id, access_token, refresh_token, expires_at)
-    return  Spotify.from_dbrow(db_spotify.get_user(spotify_user.user_id))
-
 def get_active_users_to_process():
     """ Returns a list of Spotify user instances that need their Spotify listens imported.
     """
     return [Spotify.from_dbrow(row) for row in db_spotify.get_active_users_to_process()]
-
-
-def update_last_updated(user_id, success=True, error_message=None):
-    """ Update the last_update field for user with specified user ID.
-    Also, set the user as active or inactive depending on whether their listens
-    were imported without error.
-
-    If there was an error, add the error to the db.
-
-    Args:
-        user_id (int): the ListenBrainz row ID of the user
-        success (bool): flag representing whether the last import was successful or not.
-        error_message (str): the user-friendly error message to be displayed.
-    """
-    if error_message:
-        db_spotify.add_update_error(user_id, error_message)
-    else:
-        db_spotify.update_last_updated(user_id, success)
-
-
-def update_latest_listened_at(user_id, timestamp):
-    """ Update the latest_listened_at field for user with specified ListenBrainz user ID.
-
-    Args:
-        user_id (int): the ListenBrainz row ID of the user
-        timestamp (int): the unix timestamp of the latest listen imported for the user
-    """
-    db_spotify.update_latest_listened_at(user_id, timestamp)
 
 
 def _get_spotify_token(grant_type: str, token: str) -> requests.Response:
@@ -329,6 +256,32 @@ class SpotifyService(ExternalServiceBase):
         expires_at = int(time.time()) + response['expires_in']
         db_spotify.update_token(spotify_user.user_id, access_token, refresh_token, expires_at)
         return self.get_user(spotify_user.user_id)
+
+    def update_last_updated(self, user_id, success=True, error_message=None):
+        """ Update the last_update field for user with specified user ID.
+        Also, set the user as active or inactive depending on whether their listens
+        were imported without error.
+
+        If there was an error, add the error to the db.
+
+        Args:
+            user_id (int): the ListenBrainz row ID of the user
+            success (bool): flag representing whether the last import was successful or not.
+            error_message (str): the user-friendly error message to be displayed.
+        """
+        if error_message:
+            db_spotify.add_update_error(user_id, error_message)
+        else:
+            db_spotify.update_last_updated(user_id, success)
+
+    def update_latest_listened_at(self, user_id, timestamp):
+        """ Update the latest_listened_at field for user with specified ListenBrainz user ID.
+
+        Args:
+            user_id (int): the ListenBrainz row ID of the user
+            timestamp (int): the unix timestamp of the latest listen imported for the user
+        """
+        db_spotify.update_latest_listened_at(user_id, timestamp)
 
 
 class SpotifyInvalidGrantError(Exception):

@@ -4,6 +4,8 @@ import listenbrainz.webserver
 import json
 
 from datetime import datetime
+
+from listenbrainz.domain.spotify import SpotifyService
 from listenbrainz.utils import safely_import_config
 safely_import_config()
 
@@ -256,11 +258,12 @@ def parse_and_validate_spotify_plays(plays, listen_type):
     return listens
 
 
-def process_one_user(user):
+def process_one_user(user, service):
     """ Get recently played songs for this user and submit them to ListenBrainz.
 
     Args:
         user (spotify.Spotify): the user whose plays are to be imported.
+        service (listenbrainz.domain.SpotifyService): service to perform actions
 
     Raises:
         spotify.SpotifyAPIError: if we encounter errors from the Spotify API.
@@ -270,7 +273,7 @@ def process_one_user(user):
     """
     try:
         if user.token_expired:
-            user = spotify.refresh_user_token(user)
+            user = service.refresh_user_token(user)
 
         listenbrainz_user = db_user.get(user.user_id)
 
@@ -302,14 +305,14 @@ def process_one_user(user):
         submit_listens_to_listenbrainz(listenbrainz_user, listens, listen_type=LISTEN_TYPE_IMPORT)
 
         # we've succeeded so update the last_updated field for this user
-        spotify.update_latest_listened_at(user.user_id, latest_listened_at)
-        spotify.update_last_updated(user.user_id)
+        service.update_latest_listened_at(user.user_id, latest_listened_at)
+        service.update_last_updated(user.user_id)
 
         current_app.logger.info('imported %d listens for %s' % (len(listens), str(user)))
 
     except spotify.SpotifyAPIError as e:
         # if it is an error from the Spotify API, show the error message to the user
-        spotify.update_last_updated(
+        service.update_last_updated(
             user_id=user.user_id,
             success=False,
             error_message=str(e),
@@ -323,7 +326,7 @@ def process_one_user(user):
             notify_error(user.musicbrainz_row_id, "It seems like you've revoked permission for us to read your spotify account")
         # user has revoked authorization through spotify ui or deleted their spotify account etc.
         # in any of these cases, we should delete user from our spotify db as well.
-        db_spotify.delete_spotify(user.user_id)
+        service.remove_user(user.user_id)
         raise spotify.SpotifyListenBrainzError("User has revoked spotify authorization")
 
 
@@ -347,9 +350,10 @@ def process_all_spotify_users():
     current_app.logger.info('Process %d users...' % len(users))
     success = 0
     failure = 0
+    service = SpotifyService()
     for u in users:
         try:
-            process_one_user(u)
+            process_one_user(u, service)
             success += 1
         except spotify.SpotifyListenBrainzError as e:
             current_app.logger.critical('spotify_reader could not import listens: %s', str(e), exc_info=True)
