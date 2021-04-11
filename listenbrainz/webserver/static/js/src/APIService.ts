@@ -140,7 +140,7 @@ export default class APIService {
   };
 
   refreshYoutubeToken = async (): Promise<string> => {
-    const response = await fetch("/profile/connect-youtube/refresh/", {
+    const response = await fetch("/profile/music-services/youtube/refresh/", {
       method: "POST",
     });
     await this.checkStatus(response);
