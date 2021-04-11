@@ -6,6 +6,7 @@ import listenbrainz.db.user as db_user
 import listenbrainz.webserver.rabbitmq_connection as rabbitmq_connection
 from data.model.external_service import ExternalService
 from listenbrainz.domain.service import ExternalServiceBase, ExternalServiceFeature
+from listenbrainz.domain.spotify import SpotifyService
 from listenbrainz.domain.youtube import YoutubeService
 from listenbrainz.webserver.decorators import crossdomain
 import os
@@ -269,29 +270,6 @@ def delete_listens():
         )
 
 
-@profile_bp.route('/connect-spotify', methods=['GET', 'POST'])
-@login_required
-def connect_spotify():
-    if request.method == 'POST' and request.form.get('delete') == 'yes':
-        spotify.remove_user(current_user.id)
-        flash.success('Your Spotify account has been unlinked')
-
-    user = spotify.get_user(current_user.id)
-    only_listen_sp_oauth = spotify.get_spotify_oauth(spotify.SPOTIFY_LISTEN_PERMISSIONS)
-    only_import_sp_oauth = spotify.get_spotify_oauth(spotify.SPOTIFY_IMPORT_PERMISSIONS)
-    both_sp_oauth = spotify.get_spotify_oauth(spotify.SPOTIFY_LISTEN_PERMISSIONS + spotify.SPOTIFY_IMPORT_PERMISSIONS)
-
-    return render_template(
-        'user/spotify.html',
-        account=user,
-        last_updated=user.last_updated_iso if user else None,
-        latest_listened_at=user.latest_listened_at_iso if user else None,
-        only_listen_url=only_listen_sp_oauth.get_authorize_url(),
-        only_import_url=only_import_sp_oauth.get_authorize_url(),
-        both_url=both_sp_oauth.get_authorize_url(),
-    )
-
-
 def _get_service_or_raise_404(name: str) -> ExternalServiceBase:
     """Returns the music service for the given name and raise 404 if
     service is not found
@@ -303,6 +281,8 @@ def _get_service_or_raise_404(name: str) -> ExternalServiceBase:
         service = ExternalService[name.upper()]
         if service == ExternalService.YOUTUBE:
             return YoutubeService(current_app.config["YOUTUBE_CONFIG"], current_app.config["YOUTUBE_CALLBACK_URL"])
+        else:
+            return SpotifyService()
     except KeyError:
         raise NotFound("Service %s is invalid." % name)
 
@@ -361,16 +341,41 @@ def refresh_service_token(service_name: str):
     return jsonify({"access_token": user["access_token"]})
 
 
+@profile_bp.route('/connect-spotify', methods=['GET', 'POST'])
+@login_required
+def connect_spotify():
+    service = SpotifyService()
+    if request.method == 'POST' and request.form.get('delete') == 'yes':
+        service.remove_user(current_user.id)
+        flash.success('Your Spotify account has been unlinked')
+
+    user = service.get_user(current_user.id)
+    only_listen_auth_url = service.get_authorize_url(ExternalServiceFeature.ONLY_STREAMING)
+    only_import_auth_url = service.get_authorize_url(ExternalServiceFeature.RECORD_LISTENS)
+    both_auth_url = service.get_authorize_url(ExternalServiceFeature.BOTH)
+
+    return render_template(
+        'user/spotify.html',
+        account=user,
+        last_updated=user.last_updated_iso if user else None,
+        latest_listened_at=user.latest_listened_at_iso if user else None,
+        only_listen_url=only_listen_auth_url,
+        only_import_url=only_import_auth_url,
+        both_url=both_auth_url,
+    )
+
+
 @profile_bp.route('/connect-spotify/callback')
 @login_required
 def connect_spotify_callback():
+    service = SpotifyService()
     code = request.args.get('code')
     if not code:
         raise BadRequest('missing code')
 
     try:
-        token = spotify.get_access_token(code)
-        spotify.add_new_user(current_user.id, token)
+        token = service.fetch_access_token(code)
+        service.add_new_user(current_user.id, token)
         flash.success('Successfully authenticated with Spotify!')
     except spotipy.oauth2.SpotifyOauthError as e:
         current_app.logger.error('Unable to authenticate with Spotify: %s', str(e), exc_info=True)
@@ -383,13 +388,14 @@ def connect_spotify_callback():
 @crossdomain()
 @api_login_required
 def refresh_spotify_token():
-    spotify_user = spotify.get_user(current_user.id)
+    service = SpotifyService()
+    spotify_user = service.get_user(current_user.id)
     if not spotify_user:
         raise APINotFound("User has not authenticated to Spotify")
 
     if spotify_user.token_expired:
         try:
-            spotify_user = spotify.refresh_user_token(spotify_user)
+            spotify_user = service.refresh_token(spotify_user)
         except spotify.SpotifyAPIError:
             raise APIServiceUnavailable("Cannot refresh Spotify token right now")
         except spotify.SpotifyInvalidGrantError:

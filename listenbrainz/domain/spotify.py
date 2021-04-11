@@ -3,10 +3,14 @@ import requests
 import six
 import time
 from flask import current_app
-import spotipy.oauth2
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
 
+from data.model.external_service import ExternalService
 from listenbrainz.db import spotify as db_spotify
 from datetime import datetime, timezone
+
+from listenbrainz.domain.service import ExternalServiceBase, ExternalServiceFeature
 
 SPOTIFY_API_RETRIES = 5
 
@@ -126,59 +130,7 @@ def refresh_user_token(spotify_user: Spotify):
         refresh_token = spotify_user.refresh_token
     expires_at = int(time.time()) + response['expires_in']
     db_spotify.update_token(spotify_user.user_id, access_token, refresh_token, expires_at)
-    return get_user(spotify_user.user_id)
-
-
-def get_spotify_oauth(permissions=None):
-    """ Returns a spotipy OAuth instance that can be used to authenticate with spotify.
-
-    Args: permissions ([str]): List of permissions needed by the OAuth instance
-    """
-    client_id = current_app.config['SPOTIFY_CLIENT_ID']
-    client_secret = current_app.config['SPOTIFY_CLIENT_SECRET']
-    scope = ' '.join(permissions) if permissions else None
-    redirect_url = current_app.config['SPOTIFY_CALLBACK_URL']
-    return spotipy.oauth2.SpotifyOAuth(client_id, client_secret, redirect_uri=redirect_url, scope=scope)
-
-
-def get_user(user_id):
-    """ Returns a Spotify instance corresponding to the specified LB row ID.
-    If the user_id is not present in the spotify table, returns None
-
-    Args:
-        user_id (int): the ListenBrainz row ID of the user
-    """
-    row = db_spotify.get_user(user_id)
-    if row:
-        return Spotify.from_dbrow(row)
-    return None
-
-
-def remove_user(user_id):
-    """ Delete user entry for user with specified ListenBrainz user ID.
-
-    Args:
-        user_id (int): the ListenBrainz row ID of the user
-    """
-    db_spotify.delete_spotify(user_id)
-
-
-def add_new_user(user_id, spot_access_token):
-    """Create a spotify row for a user based on OAuth access tokens
-
-    Args:
-        user_id: A flask auth `current_user.id`
-        spot_access_token: A spotipy access token from SpotifyOAuth.get_access_token
-    """
-
-    access_token = spot_access_token['access_token']
-    refresh_token = spot_access_token['refresh_token']
-    expires_at = int(time.time()) + spot_access_token['expires_in']
-    permissions = spot_access_token['scope']
-    active = SPOTIFY_IMPORT_PERMISSIONS[0] in permissions and SPOTIFY_IMPORT_PERMISSIONS[1] in permissions
-
-    db_spotify.create_spotify(user_id, access_token, refresh_token, expires_at, active, permissions)
-
+    return  Spotify.from_dbrow(db_spotify.get_user(spotify_user.user_id))
 
 def get_active_users_to_process():
     """ Returns a list of Spotify user instances that need their Spotify listens imported.
@@ -214,29 +166,6 @@ def update_latest_listened_at(user_id, timestamp):
     db_spotify.update_latest_listened_at(user_id, timestamp)
 
 
-def get_access_token(code: str):
-    """ Get a valid Spotify Access token given the code.
-
-    Returns:
-        a dict with the following keys
-        {
-            'access_token',
-            'token_type',
-            'scope',
-            'expires_in',
-            'refresh_token',
-        }
-
-    Note: We use this function instead of spotipy's implementation because there
-    is a bug in the spotipy code which leads to loss of the scope received from the
-    Spotify API.
-    """
-    r = _get_spotify_token("authorization_code", code)
-    if r.status_code != 200:
-        raise SpotifyListenBrainzError(r.reason)
-    return r.json()
-
-
 def _get_spotify_token(grant_type: str, token: str) -> requests.Response:
     """ Fetch access token or refresh token from spotify auth api
 
@@ -269,13 +198,140 @@ def get_user_dict(user_id):
     Args:
         user_id (int): the row ID of the user in ListenBrainz
     """
-    user = get_user(user_id)
+    user = db_spotify.get_user(user_id)
     if not user:
         return {}
     return {
-        'access_token': user.user_token,
-        'permission': user.permission,
+        'access_token': user['user_token'],
+        'permission': user['permission'],
     }
+
+
+class SpotifyService(ExternalServiceBase):
+
+    def __init__(self):
+        super(SpotifyService, self).__init__(ExternalService.SPOTIFY, ExternalServiceFeature.BOTH)
+
+    def add_new_user(self, user_id: int, token: dict):
+        """Create a spotify row for a user based on OAuth access tokens
+
+        Args:
+            user_id: A flask auth `current_user.id`
+            token: A spotipy access token from SpotifyOAuth.get_access_token
+        """
+
+        access_token = token['access_token']
+        refresh_token = token['refresh_token']
+        expires_at = int(time.time()) + token['expires_in']
+        permissions = token['scope']
+        active = SPOTIFY_IMPORT_PERMISSIONS[0] in permissions and SPOTIFY_IMPORT_PERMISSIONS[1] in permissions
+
+        db_spotify.create_spotify(user_id, access_token, refresh_token, expires_at, active, permissions)
+
+    def remove_user(self, user_id: int):
+        """ Delete user entry for user with specified ListenBrainz user ID.
+
+        Args:
+            user_id (int): the ListenBrainz row ID of the user
+        """
+        db_spotify.delete_spotify(user_id)
+
+    def get_user(self, user_id: int):
+        """ Returns a Spotify instance corresponding to the specified LB row ID.
+        If the user_id is not present in the spotify table, returns None
+
+        Args:
+            user_id (int): the ListenBrainz row ID of the user
+        """
+        row = db_spotify.get_user(user_id)
+        if row:
+            return Spotify.from_dbrow(row)
+        return None
+
+    def get_authorize_url(self, feature: ExternalServiceFeature):
+        """ Returns a spotipy OAuth instance that can be used to authenticate with spotify.
+
+        Args: permissions ([str]): List of permissions needed by the OAuth instance
+        """
+        client_id = current_app.config['SPOTIFY_CLIENT_ID']
+        client_secret = current_app.config['SPOTIFY_CLIENT_SECRET']
+        if feature == ExternalServiceFeature.ONLY_STREAMING:
+            permissions = SPOTIFY_LISTEN_PERMISSIONS
+        elif feature == ExternalServiceFeature.RECORD_LISTENS:
+            permissions = SPOTIFY_IMPORT_PERMISSIONS
+        else:
+            permissions = SPOTIFY_LISTEN_PERMISSIONS + SPOTIFY_IMPORT_PERMISSIONS
+        scope = ' '.join(permissions)
+        redirect_url = current_app.config['SPOTIFY_CALLBACK_URL']
+        return SpotifyOAuth(client_id, client_secret, redirect_uri=redirect_url, scope=scope).get_authorize_url()
+
+    def fetch_access_token(self, code: str):
+        """ Get a valid Spotify Access token given the code.
+
+        Returns:
+            a dict with the following keys
+            {
+                'access_token',
+                'token_type',
+                'scope',
+                'expires_in',
+                'refresh_token',
+            }
+
+        Note: We use this function instead of spotipy's implementation because there
+        is a bug in the spotipy code which leads to loss of the scope received from the
+        Spotify API.
+        """
+        r = _get_spotify_token("authorization_code", code)
+        if r.status_code != 200:
+            raise SpotifyListenBrainzError(r.reason)
+        return r.json()
+
+    def refresh_token(self, user_id: int):
+        """ Refreshes the user token for the given spotify user.
+
+        Args:
+            user_id (int): the ListenBrainz row ID of the user whose token is to be refreshed
+
+        Returns:
+            user (domain.spotify.Spotify): the same user with updated tokens
+
+        Raises:
+            SpotifyAPIError: if unable to refresh spotify user token
+            SpotifyInvalidGrantError: if the user has revoked authorization to spotify
+
+        Note: spotipy eats up the json body in case of error but we need it for checking
+        whether the user has revoked our authorization. hence, we use our own
+        code instead of spotipy to fetch refresh token.
+        """
+        spotify_user = self.get_user(user_id)
+        retries = SPOTIFY_API_RETRIES
+        response = None
+        while retries > 0:
+            response = _get_spotify_token("refresh_token", spotify_user.refresh_token)
+
+            if response.status_code == 200:
+                break
+            elif response.status_code == 400:
+                error_body = response.json()
+                if "error" in error_body and error_body["error"] == "invalid_grant":
+                    raise SpotifyInvalidGrantError(error_body)
+
+            response = None  # some other error occurred
+            retries -= 1
+
+        if response is None:
+            raise SpotifyAPIError('Could not refresh API Token for Spotify user')
+
+        response = response.json()
+        access_token = response['access_token']
+        if "refresh_token" in response:
+            refresh_token = response['refresh_token']
+        else:
+            refresh_token = spotify_user.refresh_token
+        expires_at = int(time.time()) + response['expires_in']
+        db_spotify.update_token(spotify_user.user_id, access_token, refresh_token, expires_at)
+        return self.get_user(spotify_user.user_id)
 
 
 class SpotifyInvalidGrantError(Exception):
@@ -287,8 +343,10 @@ class SpotifyInvalidGrantError(Exception):
 class SpotifyImporterException(Exception):
     pass
 
+
 class SpotifyListenBrainzError(Exception):
     pass
+
 
 class SpotifyAPIError(Exception):
     pass

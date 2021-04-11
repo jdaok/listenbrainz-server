@@ -14,7 +14,7 @@ class ExternalServiceBase(ABC):
 
     def __init__(self, service: ExternalService, features: ExternalServiceFeature):
         self.service = service
-        self.capabilities = features
+        self.features = features
 
     def add_new_user(self, user_id: int, token: dict):
         raise NotImplementedError()
@@ -22,11 +22,11 @@ class ExternalServiceBase(ABC):
     def remove_user(self, user_id: int):
         raise NotImplementedError()
 
-    def get_user(self, user_id: int) -> dict:
+    def get_user(self, user_id: int):
         raise NotImplementedError()
 
-    def get_capabilities(self) -> ExternalServiceFeature:
-        return self.capabilities
+    def get_features(self) -> ExternalServiceFeature:
+        return self.features
 
     def get_service_type(self) -> ExternalService:
         return self.service
