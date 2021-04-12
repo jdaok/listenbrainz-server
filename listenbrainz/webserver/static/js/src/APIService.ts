@@ -154,7 +154,7 @@ export default class APIService {
     });
     await this.checkStatus(response);
     const result = await response.json();
-    return result.user_token;
+    return result.access_token;
   };
 
   followUser = async (
