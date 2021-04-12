@@ -32,11 +32,12 @@ OAUTH_TOKEN_URL = 'https://accounts.spotify.com/api/token'
 
 class Spotify:
     def __init__(self, user_id, musicbrainz_id, musicbrainz_row_id, user_token, token_expires,
-                 refresh_token, last_updated, record_listens, error_message, latest_listened_at,
-                 permission):
+                 token_expired, refresh_token, last_updated, record_listens, error_message,
+                 latest_listened_at, permission):
         self.user_id = user_id
         self.user_token = user_token
         self.token_expires = token_expires
+        self.token_expired = token_expired
         self.refresh_token = refresh_token
         self.last_updated = last_updated
         self.record_listens = record_listens
@@ -49,38 +50,21 @@ class Spotify:
     def get_spotipy_client(self):
         return spotipy.Spotify(auth=self.user_token)
 
-    @property
-    def last_updated_iso(self):
-        if self.last_updated is None:
-            return None
-        return self.last_updated.isoformat() + "Z"
-
-    @property
-    def latest_listened_at_iso(self):
-        if self.latest_listened_at is None:
-            return None
-        return self.latest_listened_at.isoformat() + "Z"
-
-    @property
-    def token_expired(self):
-        now = datetime.utcnow()
-        now = now.replace(tzinfo=timezone.utc)
-        return now >= self.token_expires
-
     @staticmethod
     def from_dbrow(row):
         return Spotify(
-           user_id=row['user_id'],
-           user_token=row['user_token'],
-           token_expires=row['token_expires'],
-           refresh_token=row['refresh_token'],
-           last_updated=row['last_updated'],
-           record_listens=row['record_listens'],
-           error_message=row['error_message'],
-           musicbrainz_id=row['musicbrainz_id'],
-           musicbrainz_row_id=row['musicbrainz_row_id'],
-           latest_listened_at=row['latest_listened_at'],
-           permission=row['permission'],
+            user_id=row['user_id'],
+            user_token=row['user_token'],
+            token_expires=row['token_expires'],
+            token_expired=row['token_expired'],
+            refresh_token=row['refresh_token'],
+            last_updated=row['last_updated'],
+            record_listens=row['record_listens'],
+            error_message=row['error_message'],
+            musicbrainz_id=row['musicbrainz_id'],
+            musicbrainz_row_id=row['musicbrainz_row_id'],
+            latest_listened_at=row['latest_listened_at'],
+            permission=row['permission'],
         )
 
     def __str__(self):
@@ -170,7 +154,10 @@ class SpotifyService(ExternalServiceBase):
         Args:
             user_id (int): the ListenBrainz row ID of the user
         """
-        return db_spotify.get_user(user_id)
+        user = db_spotify.get_user(user_id)
+        if user:
+            user["access_token"] = user["user_token"]
+        return user
 
     def get_authorize_url(self, feature: ExternalServiceFeature):
         """ Returns a spotipy OAuth instance that can be used to authenticate with spotify.
@@ -218,7 +205,7 @@ class SpotifyService(ExternalServiceBase):
             user_id (int): the ListenBrainz row ID of the user whose token is to be refreshed
 
         Returns:
-            user (domain.spotify.Spotify): the same user with updated tokens
+            user (dict): the same user with updated tokens
 
         Raises:
             SpotifyAPIError: if unable to refresh spotify user token
@@ -232,7 +219,7 @@ class SpotifyService(ExternalServiceBase):
         retries = SPOTIFY_API_RETRIES
         response = None
         while retries > 0:
-            response = _get_spotify_token("refresh_token", spotify_user.refresh_token)
+            response = _get_spotify_token("refresh_token", spotify_user["refresh_token"])
 
             if response.status_code == 200:
                 break
@@ -252,10 +239,10 @@ class SpotifyService(ExternalServiceBase):
         if "refresh_token" in response:
             refresh_token = response['refresh_token']
         else:
-            refresh_token = spotify_user.refresh_token
+            refresh_token = spotify_user["refresh_token"]
         expires_at = int(time.time()) + response['expires_in']
-        db_spotify.update_token(spotify_user.user_id, access_token, refresh_token, expires_at)
-        return self.get_user(spotify_user.user_id)
+        db_spotify.update_token(user_id, access_token, refresh_token, expires_at)
+        return self.get_user(user_id)
 
     def update_last_updated(self, user_id, success=True, error_message=None):
         """ Update the last_update field for user with specified user ID.

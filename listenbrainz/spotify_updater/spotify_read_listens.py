@@ -16,12 +16,10 @@ from flask import current_app, render_template
 from listenbrainz.domain import spotify
 from listenbrainz.webserver.views.api_tools import insert_payload, validate_listen, LISTEN_TYPE_IMPORT, LISTEN_TYPE_PLAYING_NOW
 from listenbrainz.db import user as db_user
-from listenbrainz.db import spotify as db_spotify
 from listenbrainz.db.exceptions import DatabaseException
 from spotipy import SpotifyException
-from werkzeug.exceptions import BadRequest, InternalServerError, ServiceUnavailable
+from werkzeug.exceptions import InternalServerError, ServiceUnavailable
 from brainzutils.mail import send_mail
-from brainzutils import musicbrainz_db
 from brainzutils.musicbrainz_db import editor as mb_editor
 
 

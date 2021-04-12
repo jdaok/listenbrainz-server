@@ -168,7 +168,7 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
 
     @patch('listenbrainz.domain.spotify.SpotifyService.get_user')
     @patch('listenbrainz.domain.spotify.SpotifyService.refresh_token')
-    def test_spotify_refresh_token_which_has_expired(self, mock_refresh_token, mock_get_user):
+    def test_spotify_refresh_token_which_has_not_expired(self, mock_refresh_token, mock_get_user):
         self.temporary_login(self.user['login_id'])
         # token hasn't expired
         expires = datetime.utcfromtimestamp(int(time.time()) + 10).replace(tzinfo=timezone.utc)
@@ -179,7 +179,7 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
             user_token='old-token',
             access_token='old-token',
             token_expires=expires, # token hasn't expired
-            token_expired=True,
+            token_expired=False,
             refresh_token='old-refresh-token',
             last_updated=None,
             record_listens=True,
@@ -190,18 +190,13 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
         r = self.client.post(url_for('profile.refresh_service_token', service_name="spotify"))
         self.assert200(r)
         mock_refresh_token.assert_not_called()
-        self.assertDictEqual(r.json, {
-            'id': self.user['id'],
-            'musicbrainz_id': self.user['musicbrainz_id'],
-            'user_token': 'old-token',
-            'permission': 'user-read-recently-played some-other-permission',
-        })
+        self.assertDictEqual(r.json, {'access_token': 'old-token'})
 
     @patch('listenbrainz.domain.spotify.SpotifyService.get_user')
     @patch('listenbrainz.domain.spotify.SpotifyService.refresh_token')
-    def test_spotify_refresh_token_which_has_not_expired(self, mock_refresh_token, mock_get_user):
+    def test_spotify_refresh_token_which_has_expired(self, mock_refresh_token, mock_get_user):
         self.temporary_login(self.user['login_id'])
-        # token hasn't expired
+        # token has expired
         expires = datetime.utcfromtimestamp(int(time.time()) - 10).replace(tzinfo=timezone.utc)
         spotify_user = dict(
             user_id=self.user['id'],
@@ -210,7 +205,7 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
             user_token='old-token',
             access_token='old-token',
             token_expires=expires,  # token has expired
-            token_expired=False,
+            token_expired=True,
             refresh_token='old-refresh-token',
             last_updated=None,
             record_listens=True,
@@ -220,16 +215,12 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
         )
         mock_get_user.return_value = spotify_user
         spotify_user['user_token'] = 'new-token'
+        spotify_user['access_token'] = 'new-token'
         mock_refresh_token.return_value = spotify_user
         r = self.client.post(url_for('profile.refresh_service_token', service_name="spotify"))
         self.assert200(r)
         mock_refresh_token.assert_called_once()
-        self.assertDictEqual(r.json, {
-            'id': self.user['id'],
-            'musicbrainz_id': self.user['musicbrainz_id'],
-            'user_token': 'new-token',
-            'permission': 'user-read-recently-played',
-        })
+        self.assertDictEqual(r.json, {'access_token': 'new-token'})
 
     @patch('listenbrainz.domain.spotify.SpotifyService.get_user')
     @patch('listenbrainz.domain.spotify.SpotifyService.refresh_token')

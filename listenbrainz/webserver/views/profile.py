@@ -6,7 +6,7 @@ import listenbrainz.db.user as db_user
 import listenbrainz.webserver.rabbitmq_connection as rabbitmq_connection
 from data.model.external_service import ExternalService
 from listenbrainz.domain.service import ExternalServiceBase, ExternalServiceFeature
-from listenbrainz.domain.spotify import SpotifyService
+from listenbrainz.domain.spotify import SpotifyService, SpotifyInvalidGrantError
 from listenbrainz.domain.youtube import YoutubeService
 from listenbrainz.webserver.decorators import crossdomain
 import os
@@ -338,6 +338,8 @@ def refresh_service_token(service_name: str):
     if user["token_expired"]:
         try:
             user = service.refresh_token(current_user.id,)
+        except SpotifyInvalidGrantError:
+            raise APINotFound('User has revoked authorization to Spotify')
         except Exception:
             raise APIServiceUnavailable("Cannot refresh %s token right now" % service_name.capitalize())
 
