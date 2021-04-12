@@ -124,21 +124,20 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
         response = self.client.post(delete_listens_url, data={'token': invalid_auth_token}) # auth token is invalid
         self.assertStatus(response, 401)
 
-    @patch('listenbrainz.webserver.views.profile.spotify.remove_user')
-    @patch('listenbrainz.webserver.views.profile.spotify.get_spotify_oauth')
-    def test_connect_spotify(self, mock_get_spotify_oauth, mock_remove_user):
-        mock_get_spotify_oauth.return_value.get_authorize_url.return_value = 'someurl'
+    @patch('listenbrainz.domain.spotify.SpotifyService.remove_user')
+    @patch('listenbrainz.domain.spotify.SpotifyService.get_authorize_url')
+    def test_connect_spotify(self, mock_get_authorize_url, mock_remove_user):
+        mock_get_authorize_url.return_value = 'someurl'
         self.temporary_login(self.user['login_id'])
-        r = self.client.get(url_for('profile.connect_spotify'))
+        r = self.client.get(url_for('profile.connect_service', service_name="spotify"))
         self.assert200(r)
 
-        r = self.client.post(url_for('profile.connect_spotify'), data={'delete': 'yes'})
+        r = self.client.post(url_for('profile.connect_service', service_name="spotify"), data={'delete': 'yes'})
         self.assert200(r)
         mock_remove_user.assert_called_once_with(self.user['id'])
 
-
-    @patch('listenbrainz.webserver.views.profile.spotify.get_access_token')
-    @patch('listenbrainz.webserver.views.profile.spotify.add_new_user')
+    @patch('listenbrainz.domain.spotify.SpotifyService.fetch_access_token')
+    @patch('listenbrainz.domain.spotify.SpotifyService.add_new_user')
     def test_spotify_callback(self, mock_add_new_user, mock_get_access_token):
         mock_get_access_token.return_value = {
             'access_token': 'token',
@@ -146,7 +145,7 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
             'expires_in': 3600,
         }
         self.temporary_login(self.user['login_id'])
-        r = self.client.get(url_for('profile.connect_spotify_callback', code='code'))
+        r = self.client.get(url_for('profile.connect_service_callback', service_name='spotify', code='code'))
         self.assertStatus(r, 302)
         mock_get_access_token.assert_called_once_with('code')
         mock_add_new_user.assert_called_once_with(self.user['id'], {
@@ -155,30 +154,32 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
             'expires_in': 3600,
         })
 
-        r = self.client.get(url_for('profile.connect_spotify_callback'))
+        r = self.client.get(url_for('profile.connect_service_callback', service_name='spotify'))
         self.assert400(r)
 
     def test_spotify_refresh_token_logged_out(self):
-        r = self.client.post(url_for('profile.refresh_spotify_token'))
+        r = self.client.post(url_for('profile.refresh_service_token', service_name="spotify"))
         self.assert401(r)
 
     def test_spotify_refresh_token_no_token(self):
         self.temporary_login(self.user['login_id'])
-        r = self.client.post(url_for('profile.refresh_spotify_token'))
+        r = self.client.post(url_for('profile.refresh_service_token', service_name="spotify"))
         self.assert404(r)
 
-    @patch('listenbrainz.webserver.views.profile.spotify.get_user')
-    @patch('listenbrainz.webserver.views.profile.spotify.refresh_user_token')
-    def test_spotify_refresh_token_which_has_expired(self, mock_refresh_user_token, mock_get_user):
+    @patch('listenbrainz.domain.spotify.SpotifyService.get_user')
+    @patch('listenbrainz.domain.spotify.SpotifyService.refresh_token')
+    def test_spotify_refresh_token_which_has_expired(self, mock_refresh_token, mock_get_user):
         self.temporary_login(self.user['login_id'])
         # token hasn't expired
         expires = datetime.utcfromtimestamp(int(time.time()) + 10).replace(tzinfo=timezone.utc)
-        mock_get_user.return_value = spotify.Spotify(
+        mock_get_user.return_value = dict(
             user_id=self.user['id'],
             musicbrainz_id=self.user['musicbrainz_id'],
             musicbrainz_row_id=self.user['musicbrainz_row_id'],
             user_token='old-token',
+            access_token='old-token',
             token_expires=expires, # token hasn't expired
+            token_expired=True,
             refresh_token='old-refresh-token',
             last_updated=None,
             record_listens=True,
@@ -186,9 +187,9 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
             latest_listened_at=None,
             permission='user-read-recently-played some-other-permission',
         )
-        r = self.client.post(url_for('profile.refresh_spotify_token'))
+        r = self.client.post(url_for('profile.refresh_service_token', service_name="spotify"))
         self.assert200(r)
-        mock_refresh_user_token.assert_not_called()
+        mock_refresh_token.assert_not_called()
         self.assertDictEqual(r.json, {
             'id': self.user['id'],
             'musicbrainz_id': self.user['musicbrainz_id'],
@@ -196,18 +197,20 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
             'permission': 'user-read-recently-played some-other-permission',
         })
 
-    @patch('listenbrainz.webserver.views.profile.spotify.get_user')
-    @patch('listenbrainz.webserver.views.profile.spotify.refresh_user_token')
-    def test_spotify_refresh_token_which_has_not_expired(self, mock_refresh_user_token, mock_get_user):
+    @patch('listenbrainz.domain.spotify.SpotifyService.get_user')
+    @patch('listenbrainz.domain.spotify.SpotifyService.refresh_token')
+    def test_spotify_refresh_token_which_has_not_expired(self, mock_refresh_token, mock_get_user):
         self.temporary_login(self.user['login_id'])
         # token hasn't expired
         expires = datetime.utcfromtimestamp(int(time.time()) - 10).replace(tzinfo=timezone.utc)
-        spotify_user = spotify.Spotify(
+        spotify_user = dict(
             user_id=self.user['id'],
             musicbrainz_id=self.user['musicbrainz_id'],
             musicbrainz_row_id=self.user['musicbrainz_row_id'],
             user_token='old-token',
-            token_expires=expires, # token has expired
+            access_token='old-token',
+            token_expires=expires,  # token has expired
+            token_expired=False,
             refresh_token='old-refresh-token',
             last_updated=None,
             record_listens=True,
@@ -216,11 +219,11 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
             permission='user-read-recently-played',
         )
         mock_get_user.return_value = spotify_user
-        spotify_user.user_token = 'new-token'
-        mock_refresh_user_token.return_value = spotify_user
-        r = self.client.post(url_for('profile.refresh_spotify_token'))
+        spotify_user['user_token'] = 'new-token'
+        mock_refresh_token.return_value = spotify_user
+        r = self.client.post(url_for('profile.refresh_service_token', service_name="spotify"))
         self.assert200(r)
-        mock_refresh_user_token.assert_called_once()
+        mock_refresh_token.assert_called_once()
         self.assertDictEqual(r.json, {
             'id': self.user['id'],
             'musicbrainz_id': self.user['musicbrainz_id'],
@@ -228,18 +231,20 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
             'permission': 'user-read-recently-played',
         })
 
-    @patch('listenbrainz.domain.spotify.get_user')
-    @patch('listenbrainz.domain.spotify.refresh_user_token')
-    def test_spotify_refresh_token_which_has_been_revoked(self, mock_refresh_user_token, mock_get_user):
+    @patch('listenbrainz.domain.spotify.SpotifyService.get_user')
+    @patch('listenbrainz.domain.spotify.SpotifyService.refresh_token')
+    def test_spotify_refresh_token_which_has_been_revoked(self, mock_refresh_token, mock_get_user):
         self.temporary_login(self.user['login_id'])
         # token hasn't expired
         expires = datetime.utcfromtimestamp(int(time.time()) - 10).replace(tzinfo=timezone.utc)
-        spotify_user = spotify.Spotify(
+        spotify_user = dict(
             user_id=self.user['id'],
             musicbrainz_id=self.user['musicbrainz_id'],
             musicbrainz_row_id=self.user['musicbrainz_row_id'],
             user_token='old-token',
+            access_token='old-token',
             token_expires=expires,  # token has expired
+            token_expired=True,
             refresh_token='old-refresh-token',
             last_updated=None,
             record_listens=True,
@@ -248,8 +253,8 @@ class ProfileViewsTestCase(ServerTestCase, DatabaseTestCase):
             permission='user-read-recently-played',
         )
         mock_get_user.return_value = spotify_user
-        mock_refresh_user_token.side_effect = spotify.SpotifyInvalidGrantError
-        response = self.client.post(url_for('profile.refresh_spotify_token'))
+        mock_refresh_token.side_effect = spotify.SpotifyInvalidGrantError
+        response = self.client.post(url_for('profile.refresh_service_token', service_name="spotify"))
         self.assertEqual(response.json, {'code': 404, 'error': 'User has revoked authorization to Spotify'})
 
     @patch('listenbrainz.listenstore.timescale_listenstore.TimescaleListenStore.fetch_listens')

@@ -6,7 +6,7 @@ import listenbrainz.webserver
 from datetime import datetime, timezone
 
 import listenbrainz.db.user as db_user
-from listenbrainz.domain.spotify import Spotify, SpotifyAPIError, SpotifyInvalidGrantError
+from listenbrainz.domain.spotify import Spotify, SpotifyAPIError, SpotifyInvalidGrantError, SpotifyService
 from listenbrainz.spotify_updater import spotify_read_listens
 from listenbrainz.webserver.views.api_tools import LISTEN_TYPE_IMPORT
 from unittest.mock import patch, MagicMock
@@ -107,7 +107,7 @@ class ConvertListensTestCase(DatabaseTestCase):
         mock_send_mail.assert_called_once()
         self.assertListEqual(mock_send_mail.call_args[1]['recipients'], ['example@listenbrainz.org'])
 
-    @patch('listenbrainz.spotify_updater.spotify_read_listens.spotify.update_last_updated')
+    @patch('listenbrainz.domain.spotify.SpotifyService.update_last_updated')
     @patch('listenbrainz.spotify_updater.spotify_read_listens.notify_error')
     @patch('listenbrainz.spotify_updater.spotify_read_listens.make_api_request')
     @patch('listenbrainz.domain.spotify.get_active_users_to_process')
@@ -162,4 +162,4 @@ class ConvertListensTestCase(DatabaseTestCase):
             permission='user-read-recently-played',
         )
         with self.assertRaises(SpotifyInvalidGrantError):
-            spotify_read_listens.process_one_user(expired_token_spotify_user)
+            spotify_read_listens.process_one_user(expired_token_spotify_user, SpotifyService())
