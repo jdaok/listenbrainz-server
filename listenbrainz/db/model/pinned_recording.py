@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from pydantic import BaseModel, validator
-from listenbrainz.db.model.utils import check_rec_mbid_msid_is_valid_uuid, check_datetime_has_tzinfo
+from listenbrainz.db.model.utils import check_rec_mbid_msid_is_valid_uuid, check_datetime_has_tzinfo, check_string_length
 
 DAYS_UNTIL_UNPIN = 7  # default = unpin after one week
 
@@ -32,6 +32,9 @@ class PinnedRecording(BaseModel):
     _validate_created_tzinfo: classmethod = validator("created", always=True, allow_reuse=True)(check_datetime_has_tzinfo)
 
     _validate_pin_until_tzinfo: classmethod = validator("pinned_until", always=True, allow_reuse=True)(check_datetime_has_tzinfo)
+    
+    _validate_blurb_content_length: classmethod = validator("blurb_content", allow_reuse=True)(check_string_length)
+
 
     # also must validate that pinned_until datetime greater than created
     @validator("pinned_until", always=True)

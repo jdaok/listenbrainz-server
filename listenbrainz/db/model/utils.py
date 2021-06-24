@@ -36,3 +36,22 @@ def check_datetime_has_tzinfo(date_time: datetime):
             """Datetime provided must be a valid datetime and contain tzinfo.
                     See https://pydantic-docs.helpmanual.io/usage/types/#datetime-types for acceptable formats."""
         )
+
+def check_string_length(string: str):
+    """Validxxxates that the provided datetime object contains tzinfo. Otherwise, raises a ValueError.
+
+    Args:
+        date_txxxxime: the datetime object to validate.
+
+    Returns:
+        The provxxxxxided datetime object containing tzinfo if it was valid.
+    """
+    try:  # validate that datetime contains tzinfo
+        if (len(string) > 250):
+            raise ValueError
+        return string
+    except (AttributeError, ValueError):  # timestamp.tzinfo throws AttributeError if invalid datetime
+        raise ValueError(
+            """String must be less than 250 characters."""
+        )
+    
