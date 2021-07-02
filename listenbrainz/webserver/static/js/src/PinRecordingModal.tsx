@@ -1,9 +1,10 @@
 import * as React from "react";
 import { get as _get } from "lodash";
 import GlobalAppContext from "./GlobalAppContext";
+import { preciseTimestamp } from "./utils";
 
 export type PinRecordingModalProps = {
-  recordingToPin?: Listen;
+  recordingToPin: Listen;
   isCurrentUser: Boolean;
   newAlert: (
     alertType: AlertType,
@@ -13,21 +14,65 @@ export type PinRecordingModalProps = {
 };
 
 export interface PinRecordingModalState {
-  blurbContent?: string;
+  blurbContent: string;
 }
 
-export default class PinRecordingModals extends React.Component<
+export default class PinRecordingModal extends React.Component<
   PinRecordingModalProps,
   PinRecordingModalState
 > {
   static contextType = GlobalAppContext;
   declare context: React.ContextType<typeof GlobalAppContext>;
-  private maxBlurbContentLength = 250;
+  readonly maxBlurbContentLength = 280;
 
   constructor(props: PinRecordingModalProps) {
     super(props);
     this.state = { blurbContent: "" };
   }
+
+  submitPinRecording = async () => {
+    const { recordingToPin, isCurrentUser, newAlert } = this.props;
+    const { blurbContent } = this.state;
+    const { APIService, currentUser } = this.context;
+
+    if (isCurrentUser && currentUser?.auth_token) {
+      const recordingMSID = _get(
+        recordingToPin,
+        "track_metadata.additional_info.recording_msid"
+      );
+      const recordingMBID = _get(
+        recordingToPin,
+        "track_metadata.additional_info.recording_mbid"
+      );
+
+      try {
+        const status = await APIService.submitPinRecording(
+          currentUser.auth_token,
+          recordingMSID,
+          recordingMBID || undefined,
+          blurbContent || undefined
+        );
+        if (status === 200) {
+          newAlert(
+            "success",
+            `You pinned a recording!`,
+            `${recordingToPin.track_metadata.artist_name} - ${recordingToPin.track_metadata.track_name}`
+          );
+          this.setState({ blurbContent: "" });
+        }
+      } catch (error) {
+        this.handleError(error, "Error while pinning recording");
+      }
+    }
+  };
+
+  handleBlurbInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    event.preventDefault();
+    const input = event.target.value.replace(/\s\s+/g, " "); // remove line breaks and excessive spaces
+    if (input.length <= this.maxBlurbContentLength) {
+      this.setState({ blurbContent: input });
+    }
+  };
 
   handleError = (error: string | Error, title?: string): void => {
     const { newAlert } = this.props;
@@ -41,52 +86,13 @@ export default class PinRecordingModals extends React.Component<
     );
   };
 
-  handleBlurbInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    event.preventDefault();
-    const input = event.target.value.replace(/\s\s+/g, " "); // remove line breaks and
-    if (input.length > this.maxBlurbContentLength) {
-      return;
-    }
-    console.log(input.length);
-    this.setState({ blurbContent: input });
-  };
-
-  submitPinRecording = async (event: React.SyntheticEvent) => {
-    event.preventDefault();
-    const { recordingToPin, isCurrentUser, newAlert } = this.props;
-    const { blurbContent } = this.state;
-    const { APIService, currentUser } = this.context;
-
-    if (isCurrentUser && currentUser?.auth_token) {
-      const recordingMBID = _get(
-        recordingToPin,
-        "track_metadata.additional_info.recording_msid"
-      );
-      try {
-        const status = await APIService.submitPinRecording(
-          currentUser.auth_token,
-          recordingMBID,
-          blurbContent || null
-        );
-        this.setState({ blurbContent: "" });
-        if (status === 200) {
-          newAlert(
-            "success",
-            `You pinned a recording!`,
-            `${recordingToPin?.track_metadata.artist_name} - ${recordingToPin?.track_metadata.track_name}`
-          );
-        }
-      } catch (error) {
-        this.handleError(error, "Error while pinning recording");
-      }
-    }
-  };
-
   render() {
     const { recordingToPin } = this.props;
     const { blurbContent } = this.state;
-    const track_name = recordingToPin?.track_metadata?.track_name;
-    const artist_name = recordingToPin?.track_metadata?.artist_name;
+    const { track_name } = recordingToPin.track_metadata;
+    const { artist_name } = recordingToPin.track_metadata;
+    const unpin_time_ms: number =
+      new Date(Date.now()).getTime() + 1000 * 3600 * 24 * 7;
 
     return (
       <div
@@ -114,20 +120,20 @@ export default class PinRecordingModals extends React.Component<
             </div>
             <div className="modal-body">
               <p>
-                Why are you pinning{" "}
+                Why do you love{" "}
                 <b>
                   {" "}
-                  {track_name} - {artist_name}
+                  {track_name} by {artist_name}
                 </b>
                 ? (Optional)
               </p>
               <div className="form-group">
                 <textarea
                   className="form-control"
-                  id="reason"
-                  placeholder="Tell us why you love this recording!"
+                  id="blurb-content"
+                  placeholder="Let your followers know why you are showcasing this recording..."
                   value={blurbContent}
-                  name="reason"
+                  name="blurb-content"
                   onChange={this.handleBlurbInputChange}
                   rows={4}
                   style={{ resize: "vertical" }}
@@ -135,7 +141,7 @@ export default class PinRecordingModals extends React.Component<
                 />
               </div>
               <small style={{ display: "block", textAlign: "right" }}>
-                {blurbContent?.length} / {this.maxBlurbContentLength}
+                {blurbContent.length} / {this.maxBlurbContentLength}
               </small>
               <small>
                 Pinning this recording will replace any recording currently
@@ -143,7 +149,8 @@ export default class PinRecordingModals extends React.Component<
                 <b>
                   {track_name} by {artist_name}
                 </b>{" "}
-                will be unpinned from your profile in one week.
+                will be unpinned from your profile in <b>one week</b>, on{" "}
+                {preciseTimestamp(unpin_time_ms, "excludeYear")}.
               </small>
             </div>
             <div className="modal-footer">
@@ -160,7 +167,7 @@ export default class PinRecordingModals extends React.Component<
                 onClick={this.submitPinRecording}
                 data-dismiss="modal"
               >
-                Pin
+                Pin Recording
               </button>
             </div>
           </form>

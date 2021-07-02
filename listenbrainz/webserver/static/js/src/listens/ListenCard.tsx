@@ -322,14 +322,12 @@ export default class ListenCard extends React.Component<
                       title="Delete Listen"
                       action={this.deleteListen}
                     />
-                    {/* {listen.track_metadata.additional_info?.recording_mbid && ( */}
                     <ListenControl
                       title="Pin this Recording"
                       action={() => updateRecordingToPin(listen)}
                       dataToggle="modal"
                       dataTarget="#PinRecordingModal"
                     />
-                    {/* )} */}
                   </ul>
                 </>
               )}

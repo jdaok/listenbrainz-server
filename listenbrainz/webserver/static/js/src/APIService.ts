@@ -796,8 +796,9 @@ export default class APIService {
 
   submitPinRecording = async (
     userToken: string,
-    recordingMBID: string,
-    blurb_content: string | null
+    recordingMSID: string,
+    recordingMBID?: string,
+    blurb_content?: string
   ): Promise<number> => {
     const url = `${this.APIBaseURI}/pin`;
     const response = await fetch(url, {
@@ -807,6 +808,7 @@ export default class APIService {
         "Content-Type": "application/json;charset=UTF-8",
       },
       body: JSON.stringify({
+        recording_msid: recordingMSID,
         recording_mbid: recordingMBID,
         blurb_content,
       }),
